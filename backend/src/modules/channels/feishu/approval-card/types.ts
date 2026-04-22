@@ -53,10 +53,15 @@ export type ApprovalCallbackPayload = {
   note?: string
   /** Open ID of the operator who acted */
   operator?: string
-  /** ISO-8601 timestamp from the portal */
+  /** ISO-8601 timestamp from the portal — also used as HMAC input */
   decidedAt?: string
   /** Idempotency key — use approvalId + requestId to deduplicate */
   requestId?: string
+  /**
+   * HMAC-SHA256 hex token for verifying portal authenticity.
+   * token = HMAC-SHA256(APPROVAL_TOKEN_SECRET, `${approvalId}:${decidedAt}`)
+   */
+  token?: string
 }
 
 /**

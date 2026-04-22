@@ -11,6 +11,8 @@
 
 export { buildApprovalLink } from './link-builder.js'
 export { renderApprovalCard } from './card-renderer.js'
+export { handleCallback, generateCallbackToken, getStoredDecision } from './callback-handler.js'
+export type { CallbackHandlerResult, CallbackError } from './callback-handler.js'
 export type {
   ApprovalDecision,
   ApprovalLinkParams,
