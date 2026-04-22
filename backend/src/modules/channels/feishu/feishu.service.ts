@@ -1283,6 +1283,56 @@ async function handleFeishuCardAction(data: any) {
       })
     }
 
+    // Approval card callbacks — triggered when the portal posts back a decision.
+    // actionType 'approval_submit' is emitted by the mobile portal button press.
+    // actionType 'approval_decide' is an alias for direct in-card approve/reject.
+    if (
+      (action.actionType === 'approval_submit' || action.actionType === 'approval_decide') &&
+      typeof action['approvalId'] === 'string'
+    ) {
+      const { handleCallback } = await import('./approval-card/index.js')
+      const approvalId = action['approvalId'] as string
+      const decision = (action['decision'] ?? 'approved') as string
+      const note = typeof action['note'] === 'string' ? action['note'] : undefined
+      const operator =
+        typeof data?.operator?.open_id === 'string' ? (data.operator.open_id as string) : undefined
+      const decidedAt = typeof action['decidedAt'] === 'string'
+        ? (action['decidedAt'] as string)
+        : new Date().toISOString()
+      const token = typeof action['token'] === 'string' ? (action['token'] as string) : ''
+      const requestId = typeof action['requestId'] === 'string'
+        ? (action['requestId'] as string)
+        : undefined
+
+      const result = await handleCallback({
+        approvalId,
+        decision: decision as 'approved' | 'rejected' | 'pending',
+        note,
+        operator,
+        decidedAt,
+        token,
+        requestId,
+      })
+
+      if (!result.ok) {
+        const msg =
+          result.error.code === 'DUPLICATE'
+            ? 'This decision has already been recorded.'
+            : result.error.code === 'INVALID_TOKEN'
+              ? 'Token verification failed. Please try again.'
+              : result.error.message
+        return buildCardToast(msg, 'warning')
+      }
+
+      const statusLabel =
+        result.result.status === 'approved' ? '✅ Approved' : '❌ Rejected'
+      return buildCardActionResult({
+        title: `Approval ${result.result.status === 'approved' ? 'Approved' : 'Rejected'}`,
+        content: `Decision recorded for approval ${approvalId}.${note ? ` Note: ${note}` : ''}`,
+        status: statusLabel,
+      })
+    }
+
     return buildCardToast('Card action received, but no handler is registered for it.', 'warning')
   } catch (error) {
     return buildCardToast(sanitizeError(error), 'error')
