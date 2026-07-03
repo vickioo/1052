@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.exe
+.env
+.env.*
+coverage/
+*.tgz
+.DS_Store

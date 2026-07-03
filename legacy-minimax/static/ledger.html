@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PocketBiz Ledger</title>
+  <style>
+    :root{color-scheme:light dark;--bg:#f6f7fb;--card:#fff;--text:#172033;--muted:#667085;--line:#d8dee9;--pri:#2563eb;--ok:#16a34a;--bad:#dc2626;--warn:#d97706;--code:#0f172a}@media(prefers-color-scheme:dark){:root{--bg:#0b1020;--card:#111827;--text:#e5e7eb;--muted:#9ca3af;--line:#374151;--code:#020617}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.wrap{max-width:1180px;margin:0 auto;padding:24px}.top{display:flex;gap:16px;align-items:flex-end;justify-content:space-between;margin-bottom:18px}h1{margin:0;font-size:28px}p{margin:4px 0;color:var(--muted)}.grid{display:grid;grid-template-columns:minmax(0,1fr) 390px;gap:16px}.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:0 10px 25px rgba(15,23,42,.06)}label{display:block;font-weight:650;margin:12px 0 6px}textarea,select,input{width:100%;border:1px solid var(--line);border-radius:12px;background:transparent;color:var(--text);padding:11px;font:inherit}textarea{min-height:210px;resize:vertical}.row{display:flex;gap:10px}.row>*{flex:1}.btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}button{border:0;border-radius:12px;padding:10px 14px;font-weight:700;cursor:pointer;background:var(--pri);color:#fff}button.secondary{background:#475569}button.ok{background:var(--ok)}button.bad{background:var(--bad)}button.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}button:disabled{opacity:.55;cursor:not-allowed}.status{font-weight:700}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:2px 9px;margin:2px;color:var(--muted);font-size:12px}.item{border-top:1px solid var(--line);padding:12px 0;cursor:pointer}.item:first-child{border-top:0}.item b{display:block}.json{white-space:pre-wrap;background:var(--code);color:#dbeafe;border-radius:12px;padding:12px;overflow:auto;max-height:560px;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.metric{border:1px solid var(--line);border-radius:12px;padding:10px}.metric b{font-size:20px}.err{color:var(--bad)}.hint{font-size:13px;color:var(--muted)}@media(max-width:900px){.grid{grid-template-columns:1fr}.top{display:block}.wrap{padding:14px}.summary{grid-template-columns:repeat(2,1fr)}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <h1>PocketBiz Ledger</h1>
+        <p>把经营材料粘进来：AI 抽取候选 → 人工确认 → 汇总自校验。</p>
+      </div>
+      <div class="hint">入口：<code>/static/ledger.html</code> ｜ API：<code>/ledger/*</code></div>
+    </div>
+
+    <div class="grid">
+      <main class="card">
+        <div id="summary" class="summary"></div>
+
+        <label>材料类型</label>
+        <div class="row">
+          <select id="typeHint">
+            <option value="auto">自动判断</option>
+            <option value="payment">收款/付款/退款</option>
+            <option value="chat_order">客户聊天/交付/售后</option>
+            <option value="purchase">供应商/采购/报价</option>
+          </select>
+          <select id="sourceChannel">
+            <option value="web">Web</option>
+            <option value="feishu">飞书</option>
+            <option value="wechat">微信</option>
+            <option value="manual">手工录入</option>
+          </select>
+        </div>
+
+        <label>原始材料</label>
+        <textarea id="text" placeholder="例如：\n微信支付 收款到账 98.00元\n付款方：客户A\n备注：AI充值\n时间：2026-05-04 13:20"></textarea>
+        <div class="btns">
+          <button id="submitBtn" onclick="submitMaterial()">提交抽取</button>
+          <button class="ghost" onclick="fillSample()">填入样例</button>
+          <button class="secondary" onclick="loadItems()">刷新列表</button>
+        </div>
+        <p id="status" class="status"></p>
+
+        <h2>抽取结果</h2>
+        <div id="resultHint" class="hint">提交后这里会出现待确认候选。</div>
+        <div id="actions" class="btns" style="display:none">
+          <button class="ok" onclick="confirmCurrent('confirmed')">确认入账</button>
+          <button class="bad" onclick="confirmCurrent('rejected')">驳回</button>
+          <button class="secondary" onclick="confirmCurrent('pending_confirmation')">保留待确认</button>
+        </div>
+        <pre id="result" class="json" style="display:none"></pre>
+      </main>
+
+      <aside class="card">
+        <h2>待确认记录</h2>
+        <p class="hint">点击记录可查看详情。</p>
+        <div id="items"></div>
+      </aside>
+    </div>
+  </div>
+
+<script>
+let currentItem = null;
+
+const $ = id => document.getElementById(id);
+
+function setStatus(msg, isErr=false){
+  $('status').textContent = msg || '';
+  $('status').className = isErr ? 'status err' : 'status';
+}
+
+async function api(path, options={}){
+  const res = await fetch(path, {
+    headers: {'Content-Type':'application/json'},
+    ...options,
+  });
+  const data = await res.json().catch(()=>({error:'invalid json'}));
+  if(!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+async function submitMaterial(){
+  const text = $('text').value.trim();
+  if(!text){ setStatus('请先粘贴一段材料。', true); return; }
+  $('submitBtn').disabled = true;
+  setStatus('AI 正在抽取，通常需要几十秒...');
+  try{
+    const data = await api('/ledger/extract', {
+      method:'POST',
+      body: JSON.stringify({
+        text,
+        type_hint: $('typeHint').value,
+        source_channel: $('sourceChannel').value,
+      })
+    });
+    showResult(data);
+    setStatus('抽取完成，等待人工确认。');
+    await Promise.all([loadItems(), loadSummary()]);
+  }catch(e){
+    setStatus(`抽取失败：${e.message}`, true);
+  }finally{
+    $('submitBtn').disabled = false;
+  }
+}
+
+function showResult(data){
+  currentItem = data;
+  $('resultHint').style.display = 'none';
+  $('result').style.display = 'block';
+  $('actions').style.display = 'flex';
+  $('result').textContent = JSON.stringify(data, null, 2);
+}
+
+async function confirmCurrent(action){
+  if(!currentItem?.inbox_item_id){ setStatus('没有可确认记录。', true); return; }
+  try{
+    const data = await api(`/ledger/items/${currentItem.inbox_item_id}/confirm`, {
+      method:'POST',
+      body: JSON.stringify({inbox_item_id: currentItem.inbox_item_id, action})
+    });
+    showResult(data);
+    setStatus(action === 'confirmed' ? '已确认入账。' : action === 'rejected' ? '已驳回。' : '已保留待确认。');
+    await Promise.all([loadItems(), loadSummary()]);
+  }catch(e){ setStatus(`操作失败：${e.message}`, true); }
+}
+
+async function loadItems(){
+  try{
+    const data = await api('/ledger/items?limit=30');
+    $('items').innerHTML = data.items.map(item => {
+      const tables = (item.candidates || []).map(c => c.target_table).join(' + ') || '无候选';
+      const conf = item.confidence == null ? '' : ` · ${(item.confidence*100).toFixed(0)}%`;
+      return `<div class="item" onclick='showResult(${escapeHtml(JSON.stringify(item))})'>
+        <b>${escapeHtml(item.inbox_item_id || 'unknown')}</b>
+        <span class="pill">${escapeHtml(item.status || 'unknown')}</span>
+        <span class="pill">${escapeHtml(item.detected_type || 'unknown')}${conf}</span>
+        <p>${escapeHtml(tables)}</p>
+      </div>`;
+    }).join('') || '<p class="hint">暂无记录。</p>';
+  }catch(e){ $('items').innerHTML = `<p class="err">列表加载失败：${escapeHtml(e.message)}</p>`; }
+}
+
+async function loadSummary(){
+  try{
+    const s = await api('/ledger/summary');
+    $('summary').innerHTML = `
+      <div class="metric"><span>总记录</span><br><b>${s.items.total}</b></div>
+      <div class="metric"><span>待确认</span><br><b>${s.items.pending}</b></div>
+      <div class="metric"><span>P0/P1异常</span><br><b>${s.exceptions.P0}/${s.exceptions.P1}</b></div>
+      <div class="metric"><span>净现金流</span><br><b>${Number(s.cashflow.net).toFixed(2)}</b></div>`;
+  }catch(e){ $('summary').innerHTML = '<p class="err">汇总加载失败</p>'; }
+}
+
+function fillSample(){
+  $('typeHint').value = 'payment';
+  $('text').value = '微信支付 收款到账 98.00元\n付款方：客户A\n备注：AI充值\n时间：2026-05-04 13:20';
+}
+
+function escapeHtml(str){
+  return String(str).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+}
+
+loadSummary();
+loadItems();
+</script>
+</body>
+</html>
